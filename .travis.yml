@@ -1,0 +1,24 @@
+sudo: required
+language: c
+
+os:
+  - linux
+
+before_install:
+  # get google's toolchain
+  - git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 ~/aarch64-linux-android-4.9
+  
+script:  
+  # Run our compilation script
+  - ./build_Z00L.sh
+  - ./build_Z00T.sh
+  # get uploadtool
+  - wget https://github.com/probonopd/uploadtool/raw/master/upload.sh
+
+after_success:
+  - bash upload.sh $TRAVIS_BUILD_DIR/msm8916/Fire*.zip
+
+branches:
+  except:
+    - # Do not build tags that we create when we upload to GitHub Releases
+    - /^(?i:continuous)$/
