@@ -10,9 +10,7 @@ before_install:
   
 script:  
   # Run our compilation script
-git update-index --add --chmod=+x ./build_Z00T.sh
-git commit -m "Added permissions for ./build_Z00T.sh"
-git push
+  - chmod +x ./build_Z00T.sh
   - ./build_Z00T.sh
   # get uploadtool
   - wget https://github.com/probonopd/uploadtool/raw/master/upload.sh
