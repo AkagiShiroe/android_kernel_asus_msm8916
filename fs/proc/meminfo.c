@@ -25,7 +25,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	struct sysinfo i;
 	unsigned long committed;
 	unsigned long allowed;
-	struct vmalloc_info vmi;
+	struct vmalloc_info;
 	long cached;
 	unsigned long pages[NR_LRU_LISTS];
 	int lru;
