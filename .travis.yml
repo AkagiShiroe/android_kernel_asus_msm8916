@@ -10,7 +10,8 @@ before_install:
   
 script:  
   # Run our compilation script
-  - ./build_Z00T.sh
+  - RUN ["chmod","+x","./build_Z00T.sh"]
+#  - ./build_Z00T.sh
   # get uploadtool
   - wget https://github.com/probonopd/uploadtool/raw/master/upload.sh
 
