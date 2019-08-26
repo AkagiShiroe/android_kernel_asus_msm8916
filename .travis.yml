@@ -17,6 +17,7 @@ script:
 
 after_success:
   - bash upload.sh $TRAVIS_BUILD_DIR/msm8916/Fire*.zip
+  - bash upload.sh $TRAVIS_BUILD_DIR/msm8916/Ice*.zip
 
 branches:
   except:
