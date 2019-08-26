@@ -17,9 +17,9 @@
 
 static DEFINE_MUTEX(bfqio_mutex);
 
-static bool bfqio_is_removed(struct bfqio_cgroup *bgrp)
+static bool bfqio_is_removed(struct cgroup *cgroup)
 {
-	return bgrp ? !bgrp->online : false;
+	return test_bit(CGRP_REMOVED, &cgroup->flags);
 }
 
 static struct bfqio_cgroup bfqio_root_cgroup = {
@@ -39,9 +39,10 @@ static inline void bfq_init_entity(struct bfq_entity *entity,
 	entity->sched_data = &bfqg->sched_data;
 }
 
-static struct bfqio_cgroup *css_to_bfqio(struct cgroup_subsys_state *css)
+static struct bfqio_cgroup *cgroup_to_bfqio(struct cgroup *cgroup)
 {
-	return css ? container_of(css, struct bfqio_cgroup, css) : NULL;
+	return container_of(cgroup_subsys_state(cgroup, bfqio_subsys_id),
+			    struct bfqio_cgroup, css);
 }
 
 /*
@@ -110,20 +111,20 @@ static inline void bfq_group_set_parent(struct bfq_group *bfqg,
 /**
  * bfq_group_chain_alloc - allocate a chain of groups.
  * @bfqd: queue descriptor.
- * @css: the leaf cgroup_subsys_state this chain starts from.
+ * @cgroup: the leaf cgroup this chain starts from.
  *
  * Allocate a chain of groups starting from the one belonging to
  * @cgroup up to the root cgroup.  Stop if a cgroup on the chain
  * to the root has already an allocated group on @bfqd.
  */
 static struct bfq_group *bfq_group_chain_alloc(struct bfq_data *bfqd,
-					       struct cgroup_subsys_state *css)
+					       struct cgroup *cgroup)
 {
 	struct bfqio_cgroup *bgrp;
 	struct bfq_group *bfqg, *prev = NULL, *leaf = NULL;
 
-	for (; css != NULL; css = css->parent) {
-		bgrp = css_to_bfqio(css);
+	for (; cgroup != NULL; cgroup = cgroup->parent) {
+		bgrp = cgroup_to_bfqio(cgroup);
 
 		bfqg = bfqio_lookup_group(bgrp, bfqd);
 		if (bfqg != NULL) {
@@ -174,7 +175,7 @@ cleanup:
  * bfq_group_chain_link - link an allocated group chain to a cgroup
  *                        hierarchy.
  * @bfqd: the queue descriptor.
- * @css: the leaf cgroup_subsys_state to start from.
+ * @cgroup: the leaf cgroup to start from.
  * @leaf: the leaf group (to be associated to @cgroup).
  *
  * Try to link a chain of groups to a cgroup hierarchy, connecting the
@@ -186,8 +187,7 @@ cleanup:
  * per device) while the bfqio_cgroup lock protects the list of groups
  * belonging to the same cgroup.
  */
-static void bfq_group_chain_link(struct bfq_data *bfqd,
-				 struct cgroup_subsys_state *css,
+static void bfq_group_chain_link(struct bfq_data *bfqd, struct cgroup *cgroup,
 				 struct bfq_group *leaf)
 {
 	struct bfqio_cgroup *bgrp;
@@ -196,8 +196,8 @@ static void bfq_group_chain_link(struct bfq_data *bfqd,
 
 	assert_spin_locked(bfqd->queue->queue_lock);
 
-	for (; css != NULL && leaf != NULL; css = css->parent) {
-		bgrp = css_to_bfqio(css);
+	for (; cgroup != NULL && leaf != NULL; cgroup = cgroup->parent) {
+		bgrp = cgroup_to_bfqio(cgroup);
 		next = leaf->bfqd;
 
 		bfqg = bfqio_lookup_group(bgrp, bfqd);
@@ -215,9 +215,9 @@ static void bfq_group_chain_link(struct bfq_data *bfqd,
 		leaf = next;
 	}
 
-	BUG_ON(css == NULL && leaf != NULL);
-	if (css != NULL && prev != NULL) {
-		bgrp = css_to_bfqio(css);
+	BUG_ON(cgroup == NULL && leaf != NULL);
+	if (cgroup != NULL && prev != NULL) {
+		bgrp = cgroup_to_bfqio(cgroup);
 		bfqg = bfqio_lookup_group(bgrp, bfqd);
 		bfq_group_set_parent(prev, bfqg);
 	}
@@ -243,18 +243,18 @@ static void bfq_group_chain_link(struct bfq_data *bfqd,
  * have been successful.
  */
 static struct bfq_group *bfq_find_alloc_group(struct bfq_data *bfqd,
-					      struct cgroup_subsys_state *css)
+					      struct cgroup *cgroup)
 {
-	struct bfqio_cgroup *bgrp = css_to_bfqio(css);
+	struct bfqio_cgroup *bgrp = cgroup_to_bfqio(cgroup);
 	struct bfq_group *bfqg;
 
 	bfqg = bfqio_lookup_group(bgrp, bfqd);
 	if (bfqg != NULL)
 		return bfqg;
 
-	bfqg = bfq_group_chain_alloc(bfqd, css);
+	bfqg = bfq_group_chain_alloc(bfqd, cgroup);
 	if (bfqg != NULL)
-		bfq_group_chain_link(bfqd, css, bfqg);
+		bfq_group_chain_link(bfqd, cgroup, bfqg);
 	else
 		bfqg = bfqd->root_group;
 
@@ -326,8 +326,8 @@ static void bfq_bfqq_move(struct bfq_data *bfqd, struct bfq_queue *bfqq,
  * time here, at the price of slightly more complex code.
  */
 static struct bfq_group *__bfq_bic_change_cgroup(struct bfq_data *bfqd,
-						struct bfq_io_cq *bic,
-						struct cgroup_subsys_state *css)
+						 struct bfq_io_cq *bic,
+						 struct cgroup *cgroup)
 {
 	struct bfq_queue *async_bfqq = bic_to_bfqq(bic, 0);
 	struct bfq_queue *sync_bfqq = bic_to_bfqq(bic, 1);
@@ -335,9 +335,9 @@ static struct bfq_group *__bfq_bic_change_cgroup(struct bfq_data *bfqd,
 	struct bfq_group *bfqg;
 	struct bfqio_cgroup *bgrp;
 
-	bgrp = css_to_bfqio(css);
+	bgrp = cgroup_to_bfqio(cgroup);
 
-	bfqg = bfq_find_alloc_group(bfqd, css);
+	bfqg = bfq_find_alloc_group(bfqd, cgroup);
 	if (async_bfqq != NULL) {
 		entity = &async_bfqq->entity;
 
@@ -368,7 +368,7 @@ static struct bfq_group *__bfq_bic_change_cgroup(struct bfq_data *bfqd,
  * moved into its new parent group.
  */
 static void bfq_bic_change_cgroup(struct bfq_io_cq *bic,
-				  struct cgroup_subsys_state *css)
+				  struct cgroup *cgroup)
 {
 	struct bfq_data *bfqd;
 	unsigned long uninitialized_var(flags);
@@ -376,7 +376,7 @@ static void bfq_bic_change_cgroup(struct bfq_io_cq *bic,
 	bfqd = bfq_get_bfqd_locked(&(bic->icq.q->elevator->elevator_data),
 				   &flags);
 	if (bfqd != NULL) {
-		__bfq_bic_change_cgroup(bfqd, bic, css);
+		__bfq_bic_change_cgroup(bfqd, bic, cgroup);
 		bfq_put_bfqd_unlock(bfqd, &flags);
 	}
 }
@@ -406,13 +406,13 @@ static struct bfq_group *bfq_bic_update_cgroup(struct bfq_io_cq *bic)
 {
 	struct bfq_data *bfqd = bic_to_bfqd(bic);
 	struct bfq_group *bfqg;
-	struct cgroup_subsys_state *css;
+	struct cgroup *cgroup;
 
 	BUG_ON(bfqd == NULL);
 
 	rcu_read_lock();
-	css = task_css(current, bfqio_cgrp_id);
-	bfqg = __bfq_bic_change_cgroup(bfqd, bic, css);
+	cgroup = task_cgroup(current, bfqio_subsys_id);
+	bfqg = __bfq_bic_change_cgroup(bfqd, bic, cgroup);
 	rcu_read_unlock();
 
 	return bfqg;
@@ -637,16 +637,17 @@ static struct bfq_group *bfq_alloc_root_group(struct bfq_data *bfqd, int node)
 }
 
 #define SHOW_FUNCTION(__VAR)						\
-static u64 bfqio_cgroup_##__VAR##_read(struct cgroup_subsys_state *css, \
+static u64 bfqio_cgroup_##__VAR##_read(struct cgroup *cgroup,		\
 				       struct cftype *cftype)		\
 {									\
-	struct bfqio_cgroup *bgrp = css_to_bfqio(css);			\
+	struct bfqio_cgroup *bgrp;					\
 	u64 ret = -ENODEV;						\
 									\
 	mutex_lock(&bfqio_mutex);					\
-	if (bfqio_is_removed(bgrp))					\
+	if (bfqio_is_removed(cgroup))					\
 		goto out_unlock;					\
 									\
+	bgrp = cgroup_to_bfqio(cgroup);					\
 	spin_lock_irq(&bgrp->lock);					\
 	ret = bgrp->__VAR;						\
 	spin_unlock_irq(&bgrp->lock);					\
@@ -662,11 +663,11 @@ SHOW_FUNCTION(ioprio_class);
 #undef SHOW_FUNCTION
 
 #define STORE_FUNCTION(__VAR, __MIN, __MAX)				\
-static int bfqio_cgroup_##__VAR##_write(struct cgroup_subsys_state *css,\
+static int bfqio_cgroup_##__VAR##_write(struct cgroup *cgroup,		\
 					struct cftype *cftype,		\
 					u64 val)			\
 {									\
-	struct bfqio_cgroup *bgrp = css_to_bfqio(css);			\
+	struct bfqio_cgroup *bgrp;					\
 	struct bfq_group *bfqg;						\
 	int ret = -EINVAL;						\
 									\
@@ -675,9 +676,11 @@ static int bfqio_cgroup_##__VAR##_write(struct cgroup_subsys_state *css,\
 									\
 	ret = -ENODEV;							\
 	mutex_lock(&bfqio_mutex);					\
-	if (bfqio_is_removed(bgrp))					\
+	if (bfqio_is_removed(cgroup))					\
 		goto out_unlock;					\
 	ret = 0;							\
+									\
+	bgrp = cgroup_to_bfqio(cgroup);					\
 									\
 	spin_lock_irq(&bgrp->lock);					\
 	bgrp->__VAR = (unsigned short)val;				\
@@ -740,12 +743,11 @@ static struct cftype bfqio_files[] = {
 	{ },	/* terminate */
 };
 
-static struct cgroup_subsys_state *bfqio_create(struct cgroup_subsys_state
-						*parent_css)
+static struct cgroup_subsys_state *bfqio_create(struct cgroup *cgroup)
 {
 	struct bfqio_cgroup *bgrp;
 
-	if (parent_css != NULL) {
+	if (cgroup->parent != NULL) {
 		bgrp = kzalloc(sizeof(*bgrp), GFP_KERNEL);
 		if (bgrp == NULL)
 			return ERR_PTR(-ENOMEM);
@@ -768,18 +770,14 @@ static struct cgroup_subsys_state *bfqio_create(struct cgroup_subsys_state
  * behavior is that a group containing a task that forked using CLONE_IO
  * will not be destroyed until the tasks sharing the ioc die.
  */
-static int bfqio_can_attach(struct cgroup_subsys_state *css,
-			    struct cgroup_taskset *tset)
+static int bfqio_can_attach(struct cgroup *cgroup, struct cgroup_taskset *tset)
 {
 	struct task_struct *task;
 	struct io_context *ioc;
 	int ret = 0;
 
-	cgroup_taskset_for_each(task, tset) {
-		/*
-		 * task_lock() is needed to avoid races with
-		 * exit_io_context()
-		 */
+	cgroup_taskset_for_each(task, cgroup, tset) {
+		/* task_lock() is needed to avoid races with exit_io_context() */
 		task_lock(task);
 		ioc = task->io_context;
 		if (ioc != NULL && atomic_read(&ioc->nr_tasks) > 1)
@@ -799,8 +797,7 @@ static int bfqio_can_attach(struct cgroup_subsys_state *css,
 	return ret;
 }
 
-static void bfqio_attach(struct cgroup_subsys_state *css,
-			 struct cgroup_taskset *tset)
+static void bfqio_attach(struct cgroup *cgroup, struct cgroup_taskset *tset)
 {
 	struct task_struct *task;
 	struct io_context *ioc;
@@ -810,7 +807,7 @@ static void bfqio_attach(struct cgroup_subsys_state *css,
 	 * IMPORTANT NOTE: The move of more than one process at a time to a
 	 * new group has not yet been tested.
 	 */
-	cgroup_taskset_for_each(task, tset) {
+	cgroup_taskset_for_each(task, cgroup, tset) {
 		ioc = get_task_io_context(task, GFP_ATOMIC, NUMA_NO_NODE);
 		if (ioc) {
 			/*
@@ -822,16 +819,16 @@ static void bfqio_attach(struct cgroup_subsys_state *css,
 					icq->q->elevator->type->elevator_name,
 					"bfq", ELV_NAME_MAX))
 					bfq_bic_change_cgroup(icq_to_bic(icq),
-							      css);
+							      cgroup);
 			rcu_read_unlock();
 			put_io_context(ioc);
 		}
 	}
 }
 
-static void bfqio_destroy(struct cgroup_subsys_state *css)
+static void bfqio_destroy(struct cgroup *cgroup)
 {
-	struct bfqio_cgroup *bgrp = css_to_bfqio(css);
+	struct bfqio_cgroup *bgrp = cgroup_to_bfqio(cgroup);
 	struct hlist_node *tmp;
 	struct bfq_group *bfqg;
 
@@ -850,34 +847,14 @@ static void bfqio_destroy(struct cgroup_subsys_state *css)
 	kfree(bgrp);
 }
 
-static int bfqio_css_online(struct cgroup_subsys_state *css)
-{
-	struct bfqio_cgroup *bgrp = css_to_bfqio(css);
-
-	mutex_lock(&bfqio_mutex);
-	bgrp->online = true;
-	mutex_unlock(&bfqio_mutex);
-
-	return 0;
-}
-
-static void bfqio_css_offline(struct cgroup_subsys_state *css)
-{
-	struct bfqio_cgroup *bgrp = css_to_bfqio(css);
-
-	mutex_lock(&bfqio_mutex);
-	bgrp->online = false;
-	mutex_unlock(&bfqio_mutex);
-}
-
-struct cgroup_subsys bfqio_cgrp_subsys = {
+struct cgroup_subsys bfqio_subsys = {
+	.name = "bfqio",
 	.css_alloc = bfqio_create,
-	.css_online = bfqio_css_online,
-	.css_offline = bfqio_css_offline,
 	.can_attach = bfqio_can_attach,
 	.attach = bfqio_attach,
 	.css_free = bfqio_destroy,
-	.legacy_cftypes = bfqio_files,
+	.subsys_id = bfqio_subsys_id,
+	.base_cftypes = bfqio_files,
 };
 #else
 static inline void bfq_init_entity(struct bfq_entity *entity,

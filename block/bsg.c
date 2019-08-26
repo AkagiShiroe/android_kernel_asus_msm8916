@@ -270,8 +270,8 @@ bsg_map_hdr(struct bsg_device *bd, struct sg_io_v4 *hdr, fmode_t has_write_perm,
 	 * map scatter-gather elements separately and string them to request
 	 */
 	rq = blk_get_request(q, rw, GFP_KERNEL);
-	if (IS_ERR(rq))
-		return rq;
+	if (!rq)
+		return ERR_PTR(-ENOMEM);
 	blk_rq_set_block_pc(rq);
 
 	ret = blk_fill_sgv4_hdr_rq(q, rq, hdr, bd, has_write_perm);
@@ -285,9 +285,8 @@ bsg_map_hdr(struct bsg_device *bd, struct sg_io_v4 *hdr, fmode_t has_write_perm,
 		}
 
 		next_rq = blk_get_request(q, READ, GFP_KERNEL);
-		if (IS_ERR(next_rq)) {
-			ret = PTR_ERR(next_rq);
-			next_rq = NULL;
+		if (!next_rq) {
+			ret = -ENOMEM;
 			goto out;
 		}
 		rq->next_rq = next_rq;
@@ -1013,7 +1012,7 @@ int bsg_register_queue(struct request_queue *q, struct device *parent,
 	/*
 	 * we need a proper transport to send commands, not a stacked device
 	 */
-	if (!queue_is_rq_based(q))
+	if (!q->request_fn)
 		return 0;
 
 	bcd = &q->bsg_dev;
