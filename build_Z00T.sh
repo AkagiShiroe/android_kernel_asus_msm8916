@@ -9,8 +9,8 @@ red='\033[0;31m'
 nocol='\033[0m'
 
 # Kernel details
-KERNEL_NAME="Fire"
-VERSION="r2.6"
+KERNEL_NAME="Ice"
+VERSION="0.1"
 DATE=$(date +"%d-%m-%Y-%I-%M")
 DEVICE="Z00T"
 OUT="msm8916"
@@ -25,7 +25,7 @@ UPLOAD_DIR=$TRAVIS_BUILD_DIR/$OUT
 # Export
 export ARCH=arm64
 export CROSS_COMPILE=~/aarch64-linux-android-4.9/bin/aarch64-linux-android-
-export KBUILD_BUILD_USER="theimpulson"
+export KBUILD_BUILD_USER="Akagi"
 export KBUILD_BUILD_HOST="asus-dev"
 
 make $defconfig
