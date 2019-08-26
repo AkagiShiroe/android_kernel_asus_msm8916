@@ -210,7 +210,7 @@ static inline void bfq_schedule_dispatch(struct bfq_data *bfqd)
 {
 	if (bfqd->queued != 0) {
 		bfq_log(bfqd, "schedule dispatch");
-		kblockd_schedule_work(bfqd->queue, &bfqd->unplug_work);
+		kblockd_schedule_work(&bfqd->unplug_work);
 	}
 }
 
@@ -1177,10 +1177,10 @@ static void bfq_merged_requests(struct request_queue *q, struct request *rq,
 	 */
 	if (bfqq == next_bfqq &&
 	    !list_empty(&rq->queuelist) && !list_empty(&next->queuelist) &&
-	    time_before(rq_fifo_time(next), rq_fifo_time(rq))) {
+	    time_before(next->fifo_time, rq->fifo_time)) {
 		list_del_init(&rq->queuelist);
 		list_replace_init(&next->queuelist, &rq->queuelist);
-		rq_set_fifo_time(rq, rq_fifo_time(next));
+		rq->fifo_time = next->fifo_time;
 	}
 
 	if (bfqq->next_rq == next)
@@ -1234,7 +1234,7 @@ static inline sector_t bfq_io_struct_pos(void *io_struct, bool request)
 	if (request)
 		return blk_rq_pos(io_struct);
 	else
-		return ((struct bio *)io_struct)->bi_sector;
+		return ((struct bio *)io_struct)->bi_iter.bi_sector;
 }
 
 static inline sector_t bfq_dist_from(sector_t pos1,
@@ -1796,7 +1796,7 @@ static struct request *bfq_check_fifo(struct bfq_queue *bfqq)
 
 	rq = rq_entry_fifo(bfqq->fifo.next);
 
-	if (time_before(jiffies, rq_fifo_time(rq)))
+	if (time_before(jiffies, rq->fifo_time))
 		return NULL;
 
 	return rq;
@@ -3372,7 +3372,7 @@ static void bfq_insert_request(struct request_queue *q, struct request *rq)
 	 */
 	if (bfqq->bic != NULL)
 		bfqq->bic->wr_time_left = 0;
-	rq_set_fifo_time(rq, jiffies + bfqd->bfq_fifo_expire[rq_is_sync(rq)]);
+	rq->fifo_time = jiffies + bfqd->bfq_fifo_expire[rq_is_sync(rq)];
 	list_add_tail(&rq->queuelist, &bfqq->fifo);
 
 	bfq_rq_enqueued(bfqd, bfqq, rq);
@@ -3897,6 +3897,18 @@ static int bfq_init_queue(struct request_queue *q, struct elevator_type *e)
 	return 0;
 }
 
+static void bfq_registered_queue(struct request_queue *q)
+{
+	struct elevator_queue *e = q->elevator;
+	struct bfq_data *bfqd = e->elevator_data;
+
+	/*
+	 * Default to IOPS mode with no idling for SSDs
+	 */
+	if (blk_queue_nonrot(q))
+		bfqd->bfq_slice_idle = 0;
+}
+
 static void bfq_slab_kill(void)
 {
 	if (bfq_pool != NULL)
@@ -4160,6 +4172,7 @@ static struct elevator_type iosched_bfq = {
 		.elevator_may_queue_fn =	bfq_may_queue,
 		.elevator_init_fn =		bfq_init_queue,
 		.elevator_exit_fn =		bfq_exit_queue,
+		.elevator_registered_fn =	bfq_registered_queue,
 	},
 	.icq_size =		sizeof(struct bfq_io_cq),
 	.icq_align =		__alignof__(struct bfq_io_cq),

@@ -662,6 +662,7 @@ void del_gendisk(struct gendisk *disk)
 
 	kobject_put(disk->part0.holder_dir);
 	kobject_put(disk->slave_dir);
+	disk->driverfs_dev = NULL;
 	if (!sysfs_deprecated)
 		sysfs_remove_link(block_depr, dev_name(disk_to_dev(disk)));
 	pm_runtime_set_memalloc_noio(disk_to_dev(disk), false);
@@ -1278,8 +1279,7 @@ struct gendisk *alloc_disk_node(int minors, int node_id)
 {
 	struct gendisk *disk;
 
-	disk = kmalloc_node(sizeof(struct gendisk),
-				GFP_KERNEL | __GFP_ZERO, node_id);
+	disk = kzalloc_node(sizeof(struct gendisk), GFP_KERNEL, node_id);
 	if (disk) {
 		if (!init_part_stats(&disk->part0)) {
 			kfree(disk);
@@ -1515,9 +1515,11 @@ static void __disk_unblock_events(struct gendisk *disk, bool check_now)
 	intv = disk_events_poll_jiffies(disk);
 	set_timer_slack(&ev->dwork.timer, intv / 4);
 	if (check_now)
-		queue_delayed_work(system_freezable_wq, &ev->dwork, 0);
+		queue_delayed_work(system_freezable_power_efficient_wq,
+				&ev->dwork, 0);
 	else if (intv)
-		queue_delayed_work(system_freezable_wq, &ev->dwork, intv);
+		queue_delayed_work(system_freezable_power_efficient_wq,
+				&ev->dwork, intv);
 out_unlock:
 	spin_unlock_irqrestore(&ev->lock, flags);
 }
@@ -1560,14 +1562,15 @@ void disk_flush_events(struct gendisk *disk, unsigned int mask)
 	spin_lock_irq(&ev->lock);
 	ev->clearing |= mask;
 	if (!ev->block)
-		mod_delayed_work(system_freezable_wq, &ev->dwork, 0);
+		mod_delayed_work(system_freezable_power_efficient_wq,
+				&ev->dwork, 0);
 	spin_unlock_irq(&ev->lock);
 }
 
 /**
  * disk_clear_events - synchronously check, clear and return pending events
  * @disk: disk to fetch and clear events from
- * @mask: mask of events to be fetched and clearted
+ * @mask: mask of events to be fetched and cleared
  *
  * Disk events are synchronously checked and pending events in @mask
  * are cleared and returned.  This ignores the block count.
@@ -1653,7 +1656,8 @@ static void disk_check_events(struct disk_events *ev,
 
 	intv = disk_events_poll_jiffies(disk);
 	if (!ev->block && intv)
-		queue_delayed_work(system_freezable_wq, &ev->dwork, intv);
+		queue_delayed_work(system_freezable_power_efficient_wq,
+				&ev->dwork, intv);
 
 	spin_unlock_irq(&ev->lock);
 
