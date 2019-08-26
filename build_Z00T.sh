@@ -9,8 +9,8 @@ red='\033[0;31m'
 nocol='\033[0m'
 
 # Kernel details
-KERNEL_NAME="Ice"
-VERSION="0.1"
+KERNEL_NAME="Icey"
+VERSION="0.2"
 DATE=$(date +"%d-%m-%Y-%I-%M")
 DEVICE="Z00T"
 OUT="msm8916"
