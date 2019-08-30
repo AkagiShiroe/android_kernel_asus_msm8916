@@ -31,7 +31,7 @@ export CCOMPILE=$CROSS_COMPILE;
 export CROSS_COMPILE="/usr/bin/ccache aarch64-linux-gnu-" ;
 export PATH=$PATH:./aarch64-linux-gnu/bin/ ;
 make Z00T_defconfig;
-make -j8(nproc --all);
+make -j$(nproc --all);
 mkdir -p tmp_mod;
 make -j4 modules_install INSTALL_MOD_PATH=tmp_mod INSTALL_MOD_STRIP=1;
 find tmp_mod/ -name '*.ko' -type f -exec cp '{}' $ANYKERNEL_DIR/modules/system/lib/modules/ \;
